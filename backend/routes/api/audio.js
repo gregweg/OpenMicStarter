@@ -164,6 +164,116 @@ router.put('/:audio', auth.required, function(req, res, next) {
 			if(typeof req.body.audio.body !== 'undefined'){
 				req.audio.body = req.body.audio.body;
 			}
+
+			if(typeof req.body.audio.tagList !== 'undefined'){
+				req.audio.tagList = req.body.audio.tagList
+			}
+
+			req.audio.save().then(function(article){
+				return res.json({audio: audio.toJSONFor(user)});
+			}).catch(next);
+		} else {
+			return res.sendStatus(403);
 		}
-	})
+	});
 });
+
+// delete audio
+router.delete('/:article', auth.required, function(req, res, next) {
+	User.findById(req.payload.id).then(function(user){
+		if (!user) { return res.sendStatus(401); }
+
+		if(req.audio.author._id.toString() === req.payload.id.toString()){
+			return req.audio.remove().then(function(){
+				return res.sendStatus(204);
+			});
+		} else {
+			return res.sendStatus(403);
+		}
+	}).catch(next);
+});
+
+// Favorite an audio
+router.post('/:audio/favorite', auth.required, function(req, res, next) {
+	var audioId = req.audio._id;
+
+	User.findById(req.payload.id).then(function(user){
+		if (!user) { return res.sendStatus(401); }
+
+		return user.favorite(audioId).then(function(){
+			return req.audio.updateFavoriteCount().then(function(audio){
+				return res.json({audio: audio.toJSONFor(user)});
+			});
+		});
+	}).catch(next);
+});
+
+// Unfavorite an article
+router.delete('/:audio/favorite', auth.required, function(req, res, next) {
+	var audioId = req.audio._id;
+
+	User.findById(req.payload.id).then(function(user) {
+		if (!user) { return res.sendStatus(401); }
+
+		return user.unfavorite(audioId).then(function(){
+			return req.audio.updateFavoriteCount().then(function(audio){
+				return res.json({audio: audio.toJSONFor(user)});
+			});
+		});
+	}).catch(next);
+});
+
+// return an article's comments
+router.get('/:audio/comments', auth.optional, function(req, res, next){
+	Promise.resolve(req.payload ? User.findById(req.payload.id) : null).then(function(user){
+		return req.audio.populate({
+			path: 'comments',
+			populate: {
+				path: 'author'
+			},
+			options: {
+				sort: {
+					createdAt: 'desc'
+				}
+			}
+		}).execPopulate().then(function(article) {
+			return res.json({comments: req.audio.comments.map(function(comment){
+				return comment.toJSONFor(user);
+			})});
+		});
+	}).catch(next);
+});
+
+// create a new comment
+router.post('/:audio/comments', auth.required, function(req, res, next) {
+	User.findById(req.payload.id).then(function(user){
+		if(!user) { return res.sendStatus(401); }
+
+		var comment = new Comment(req.body.comment);
+		comment.audio = req.audio;
+		comment.author = user;
+
+		return comment.save().then(function(){
+			req.audio.comments.push(comment);
+
+			return req.audio.save().then(function(audio) {
+				res.json({comment: comment.toJSONFor(user)});
+			});
+		});
+	}).catch(next);
+});
+
+router.delete('/:audio/comments/:comment', auth.required, function(req, res, next) {
+	if(req.comment.author.toString() === req.payload.id.toString()) {
+		req.audio.comments.remove(req.comment._id);
+		req.audio.save()
+			.then(Comment.find({_id: req.comment._id}).remove().exec())
+			.then(function(){
+				res.sendStatus(204);
+			});
+	} else {
+		res.sendStatus(403);
+	}
+});
+
+module.exports = router;
